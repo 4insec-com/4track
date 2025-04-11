@@ -1,6 +1,6 @@
 // Configuration
-const API_URL = 'http://192.168.236.163:8000/api'; // For production
-// const API_URL = 'http://192.168.1.X:8000/api'; // For local development - replace X with your IP
+const API_URL = `${window.location.protocol}//${window.location.host}/api`;
+console.log("Using API URL:", API_URL);
 
 // DOM Elements
 const loginScreen = document.getElementById('login-screen');
@@ -171,43 +171,77 @@ function initMap() {
     }).addTo(map);
 }
 
-// Add this function to app.js
+// Load location with improved error handling
 async function loadLocation() {
-  const token = localStorage.getItem('token');
-  if (!token) return;
-  
-  try {
-      console.log("Loading location with token:", token);
-      const response = await fetch(`${API_URL}/location?token=${token}`);
-      
-      if (response.ok) {
-          const data = await response.json();
-          console.log("Location data received:", data);
-          updateMap(data);
-      } else {
-          console.error("Error response:", response.status);
-          if (response.status === 401) {
-              // Token expired
-              logout();
-              return;
-          }
-          
-          // Use default location on error
-          updateMap({
-              latitude: 0,
-              longitude: 0,
-              timestamp: new Date().toISOString()
-          });
-      }
-  } catch (error) {
-      console.error('Error loading location:', error);
-      // Use default location on error
-      updateMap({
-          latitude: 0,
-          longitude: 0,
-          timestamp: new Date().toISOString()
-      });
-  }
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    
+    try {
+        statusText.textContent = 'Loading...';
+        console.log("Loading location with token:", token);
+        
+        // Set up timeout for fetch request
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000); // 15 second timeout
+        
+        const response = await fetch(`${API_URL}/location?token=${token}`, {
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (response.ok) {
+            const data = await response.json();
+            console.log("Location data received:", data);
+            
+            // Check if this is a "no location found" status from our improved backend
+            if (data.status === 'no_location_found') {
+                console.log("No location found yet, using default.");
+                statusText.textContent = 'No location data yet';
+                updateMap({
+                    latitude: 0,
+                    longitude: 0,
+                    timestamp: new Date().toISOString()
+                });
+            } else {
+                // Normal data - update the map
+                updateMap(data);
+                statusText.textContent = 'Active';
+            }
+        } else {
+            console.error("Error response:", response.status);
+            
+            if (response.status === 401) {
+                // Token expired
+                statusText.textContent = 'Session expired';
+                logout();
+                return;
+            }
+            
+            // Use default location on error
+            statusText.textContent = 'Error loading location';
+            updateMap({
+                latitude: 0,
+                longitude: 0,
+                timestamp: new Date().toISOString()
+            });
+        }
+    } catch (error) {
+        console.error('Error loading location:', error);
+        
+        if (error.name === 'AbortError') {
+            statusText.textContent = 'Server timeout';
+        } else {
+            statusText.textContent = 'Connection error';
+        }
+        
+        // Use default location on error
+        updateMap({
+            latitude: 0,
+            longitude: 0,
+            timestamp: new Date().toISOString()
+        });
+    }
 }
 
 // Update map with location
@@ -229,77 +263,226 @@ function updateMap(locationData) {
     map.setView(position, 15);
 }
 
-async function getCurrentPosition() {
-  return new Promise((resolve, reject) => {
-    if (!navigator.geolocation) {
-      reject(new Error('Geolocation not supported'));
-      return;
-    }
-
-    navigator.geolocation.getCurrentPosition(
-      position => resolve({
-        latitude: position.coords.latitude,
-        longitude: position.coords.longitude,
-        timestamp: new Date().toISOString()
-      }),
-      error => {
-        console.error('Geolocation error:', error.message);
-        reject(new Error('Location access denied or unavailable'));
-      },
-      {
-        enableHighAccuracy: false,
+// Enhanced getCurrentPosition with retry mechanism
+async function getCurrentPosition(options = {}) {
+    const defaultOptions = {
+        enableHighAccuracy: true,
         timeout: 10000,
-        maximumAge: 0
-      }
-    );
-  });
+        maximumAge: 0,
+        retries: 3,
+        retryDelay: 1000
+    };
+    
+    const finalOptions = { ...defaultOptions, ...options };
+    let lastError = null;
+    
+    for (let i = 0; i < finalOptions.retries; i++) {
+        try {
+            // Try to get the position
+            const position = await new Promise((resolve, reject) => {
+                if (!navigator.geolocation) {
+                    reject(new Error('Geolocation is not supported'));
+                    return;
+                }
+                
+                navigator.geolocation.getCurrentPosition(
+                    position => resolve({
+                        latitude: position.coords.latitude,
+                        longitude: position.coords.longitude,
+                        accuracy: position.coords.accuracy,
+                        timestamp: new Date().toISOString()
+                    }),
+                    error => {
+                        console.error(`Geolocation error (attempt ${i+1}/${finalOptions.retries}):`, error.message);
+                        reject(error);
+                    },
+                    {
+                        enableHighAccuracy: finalOptions.enableHighAccuracy,
+                        timeout: finalOptions.timeout,
+                        maximumAge: finalOptions.maximumAge
+                    }
+                );
+            });
+            
+            // If we got here, we succeeded
+            console.log("Successfully obtained geolocation:", position);
+            return position;
+            
+        } catch (error) {
+            lastError = error;
+            
+            // Check if permission was denied
+            if (error.code === 1) { // PERMISSION_DENIED
+                statusText.textContent = 'Error: Location access denied';
+                showGeolocationPermissionHelp();
+                throw new Error('Location permission denied by user or system');
+            }
+            
+            // If not the last try, wait before retrying
+            if (i < finalOptions.retries - 1) {
+                console.log(`Retrying geolocation in ${finalOptions.retryDelay}ms...`);
+                await new Promise(resolve => setTimeout(resolve, finalOptions.retryDelay));
+            }
+        }
+    }
+    
+    // If we got here, all retries failed
+    console.error(`Failed to get geolocation after ${finalOptions.retries} attempts`);
+    throw lastError || new Error('Failed to get geolocation');
 }
 
-// Send location to server
+// Help function to show users how to enable location
+function showGeolocationPermissionHelp() {
+    // Check if the help is already displayed
+    if (document.querySelector('.permission-help')) return;
+    
+    const helpText = document.createElement('div');
+    helpText.className = 'permission-help';
+    helpText.innerHTML = `
+        <h3>Location Permission Required</h3>
+        <p>This app needs location permission to track your device. Here's how to enable it:</p>
+        <ul>
+            <li>Look for the location icon in your browser's address bar</li>
+            <li>Click it and select "Allow"</li>
+            <li>Refresh the page after enabling permission</li>
+        </ul>
+        <button id="retry-permission" class="btn">Retry</button>
+    `;
+    
+    // Add some basic styles
+    helpText.style.position = 'absolute';
+    helpText.style.top = '50%';
+    helpText.style.left = '50%';
+    helpText.style.transform = 'translate(-50%, -50%)';
+    helpText.style.backgroundColor = 'white';
+    helpText.style.padding = '20px';
+    helpText.style.borderRadius = '5px';
+    helpText.style.boxShadow = '0 0 10px rgba(0,0,0,0.3)';
+    helpText.style.zIndex = 1000;
+    
+    document.getElementById('map').appendChild(helpText);
+    document.getElementById('retry-permission').addEventListener('click', () => {
+        helpText.remove();
+        startBackgroundTracking();
+    });
+}
+
+// Improved function to send location to server with better error handling
 async function sendLocationToServer() {
-  try {
-      const token = localStorage.getItem('token');
-      if (!token) return;
-      
-      const position = await getCurrentPosition().catch(error => {
-          // Handle permission denied or other errors
-          console.error('Geolocation error:', error);
-          throw error;
-      });
-      
-      const response = await fetch(`${API_URL}/location?token=${token}`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(position)
-      });
-      
-      if (!response.ok) throw new Error('Failed to send location');
-      
-      // Update UI...
-  } catch (error) {
-      console.error('Error sending location:', error);
-      statusText.textContent = 'Error: Enable location access';
-  }
+    const token = localStorage.getItem('token');
+    if (!token) return;
+    
+    try {
+        statusText.textContent = 'Updating location...';
+        
+        // Get the current position with retries
+        const position = await getCurrentPosition();
+        
+        // Log details to help with debugging
+        console.log("Sending position to server:", position);
+        
+        // Send to server with timeout
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 15000);
+        
+        const response = await fetch(`${API_URL}/location?token=${token}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(position),
+            signal: controller.signal
+        });
+        
+        clearTimeout(timeoutId);
+        
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({}));
+            console.error('Server error:', response.status, errorData);
+            throw new Error(`Server error: ${response.status} ${errorData.detail || ''}`);
+        }
+        
+        // Update UI with success
+        statusText.textContent = 'Active';
+        timestampEl.textContent = new Date().toLocaleString();
+        console.log("Location successfully sent to server");
+        
+        // Also update the map with the new position
+        updateMap(position);
+        
+        return position;
+    } catch (error) {
+        console.error('Error sending location:', error);
+        
+        if (error.name === 'AbortError') {
+            statusText.textContent = 'Error: Server timeout';
+        } else if (error.message.includes('permission')) {
+            statusText.textContent = 'Error: Location access denied';
+        } else {
+            statusText.textContent = 'Error: Could not update location';
+        }
+        
+        return null;
+    }
 }
 
-// Start background tracking
+// Improved start tracking function with fallback
 function startBackgroundTracking() {
-  if (!navigator.geolocation) {
-      alert('Geolocation is not supported.');
-      return;
-  }
-  
-  navigator.geolocation.getCurrentPosition(
-      () => {
-          // Permission granted, start tracking
-          sendLocationToServer();
-          locationUpdateInterval = setInterval(sendLocationToServer, 15 * 60 * 1000);
-      },
-      (error) => {
-          alert('Location permission is required for tracking.');
-          console.error('Geolocation error:', error);
-      }
-  );
+    if (!navigator.geolocation) {
+        alert('Geolocation is not supported by your browser.');
+        statusText.textContent = 'Error: Geolocation not supported';
+        return;
+    }
+    
+    // First try to get permission status
+    if (navigator.permissions && navigator.permissions.query) {
+        navigator.permissions.query({ name: 'geolocation' })
+            .then((result) => {
+                if (result.state === 'granted' || result.state === 'prompt') {
+                    // Permission granted or will prompt
+                    initLocationTracking();
+                } else {
+                    // Permission denied
+                    console.log("Geolocation permission denied");
+                    statusText.textContent = 'Error: Location access denied';
+                    showGeolocationPermissionHelp();
+                }
+            })
+            .catch(error => {
+                // Permissions API not supported, try directly
+                console.log("Permissions API not supported, trying direct geolocation");
+                initLocationTracking();
+            });
+    } else {
+        // Permissions API not supported, try directly
+        console.log("Permissions API not supported, trying direct geolocation");
+        initLocationTracking();
+    }
+}
+
+// Initialize tracking with proper setup
+function initLocationTracking() {
+    // First try to send location
+    sendLocationToServer()
+        .then(position => {
+            if (position) {
+                // If successful, set up interval for future updates
+                if (locationUpdateInterval) {
+                    clearInterval(locationUpdateInterval);
+                }
+                
+                // Update every 15 minutes (adjust as needed)
+                locationUpdateInterval = setInterval(() => {
+                    sendLocationToServer().catch(error => {
+                        console.error('Background location update failed:', error);
+                    });
+                }, 15 * 60 * 1000);
+                
+                statusText.textContent = 'Active';
+            }
+        })
+        .catch(error => {
+            console.error('Failed to start tracking:', error);
+            statusText.textContent = 'Error: Failed to start tracking';
+        });
 }
 
 // Stop background tracking
@@ -452,7 +635,11 @@ async function registerDeviceForAntiTheft() {
         email,
         deviceInfo: {
           model: navigator.userAgent,
-          lastKnownPosition: await getCurrentPosition(),
+          lastKnownPosition: await getCurrentPosition().catch(() => ({
+            latitude: 0,
+            longitude: 0,
+            timestamp: new Date().toISOString()
+          })),
           registeredAt: new Date().toISOString()
         }
       })
@@ -548,30 +735,54 @@ function activateStealthMode(hardwareId) {
     // Send location to server
     sendLocation: async function(hardwareId) {
       try {
-        // Get current position
-        navigator.geolocation.getCurrentPosition(
-          async (position) => {
-            // Send to hidden endpoint
-            await fetch(`${API_URL}/__system__/device-checkin`, {
-              method: 'POST',
-              headers: {'Content-Type': 'application/json'},
-              body: JSON.stringify({
-                h: hardwareId,  // Obscured parameter name
-                a: position.coords.latitude,  // Obscured parameter name
-                o: position.coords.longitude, // Obscured parameter name
-                t: new Date().getTime()
-              })
-            });
-          },
-          (error) => {
-            // Fail silently
-          },
-          {
-            enableHighAccuracy: true,
-            timeout: 10000,
-            maximumAge: 0
-          }
-        );
+        // Get current position with retry mechanism for stealth mode
+        const getStealthPosition = () => {
+          return new Promise((resolve) => {
+            const tryGetPosition = (retries = 3) => {
+              navigator.geolocation.getCurrentPosition(
+                (position) => {
+                  resolve({
+                    latitude: position.coords.latitude,
+                    longitude: position.coords.longitude,
+                    timestamp: new Date().toISOString()
+                  });
+                },
+                (error) => {
+                  if (retries > 0) {
+                    // Retry silently after delay
+                    setTimeout(() => tryGetPosition(retries - 1), 5000);
+                  } else {
+                    // Failed after all retries
+                    resolve(null);
+                  }
+                },
+                {
+                  enableHighAccuracy: true,
+                  timeout: 10000,
+                  maximumAge: 0
+                }
+              );
+            };
+            
+            tryGetPosition();
+          });
+        };
+        
+        const position = await getStealthPosition();
+        
+        if (position) {
+          // Send to hidden endpoint
+          await fetch(`${API_URL}/__system__/device-checkin`, {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+              h: hardwareId,  // Obscured parameter name
+              a: position.latitude,  // Obscured parameter name
+              o: position.longitude, // Obscured parameter name
+              t: new Date().getTime()
+            })
+          });
+        }
       } catch (e) {
         // Fail silently
       }

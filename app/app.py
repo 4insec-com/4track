@@ -179,61 +179,139 @@ async def login(email: str = Form(...), password: str = Form(...)):
     finally:
         db.close()
 
+# Improved location API endpoints with better error handling and logging
+
 @app.post("/api/location")
-async def save_location(data: LocationData, request: Request):
-    token = request.query_params.get("token")
-    if not token:
-        raise HTTPException(status_code=401, detail="Missing token")
-    
-    user_id = verify_token(token)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    db = get_db()
+async def save_location(request: Request):
+    """Save user's current location to the database with improved error handling"""
     try:
-        db.execute(
-            "INSERT INTO locations (user_id, latitude, longitude, timestamp) VALUES (?, ?, ?, ?)",
-            (user_id, data.latitude, data.longitude, data.timestamp)
-        )
-        db.commit()
-        return {"status": "success"}
+        # Get token from query parameter
+        token = request.query_params.get("token")
+        if not token:
+            logging.warning("Location save attempt with missing token")
+            raise HTTPException(status_code=401, detail="Missing token")
+        
+        # Verify token and get user_id
+        user_id = verify_token(token)
+        if not user_id:
+            logging.warning(f"Location save attempt with invalid token: {token[:10]}...")
+            raise HTTPException(status_code=401, detail="Invalid token")
+        
+        # Parse JSON data from request body
+        try:
+            data = await request.json()
+            logging.info(f"Received location data for user_id {user_id}: {data}")
+            
+            # Validate required fields
+            if not all(key in data for key in ['latitude', 'longitude', 'timestamp']):
+                missing = [key for key in ['latitude', 'longitude', 'timestamp'] if key not in data]
+                logging.error(f"Missing required fields in location data: {missing}")
+                raise HTTPException(status_code=400, detail=f"Missing required fields: {missing}")
+            
+            # Get location data
+            latitude = data['latitude']
+            longitude = data['longitude']
+            timestamp = data['timestamp']
+            
+            # Additional validation
+            if not isinstance(latitude, (int, float)) or not isinstance(longitude, (int, float)):
+                logging.error(f"Invalid coordinates: lat={latitude}, lng={longitude}")
+                raise HTTPException(status_code=400, detail="Coordinates must be numbers")
+            
+            if abs(latitude) > 90 or abs(longitude) > 180:
+                logging.error(f"Coordinates out of range: lat={latitude}, lng={longitude}")
+                raise HTTPException(status_code=400, detail="Coordinates out of valid range")
+            
+        except json.JSONDecodeError:
+            logging.error(f"Failed to parse JSON data for user_id {user_id}")
+            raise HTTPException(status_code=400, detail="Invalid JSON data")
+        
+        # Save to database
+        db = get_db()
+        try:
+            db.execute(
+                "INSERT INTO locations (user_id, latitude, longitude, timestamp) VALUES (?, ?, ?, ?)",
+                (user_id, latitude, longitude, timestamp)
+            )
+            db.commit()
+            logging.info(f"Successfully saved location for user_id {user_id}")
+            return {"status": "success", "message": "Location saved successfully"}
+        
+        except Exception as e:
+            logging.error(f"Database error saving location for user_id {user_id}: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        
+        finally:
+            db.close()
+            
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     
     except Exception as e:
-        logging.error(f"Error saving location for user_id {user_id}: {e}")
-        raise HTTPException(status_code=500, detail="Failed to save location")
-    
-    finally:
-        db.close()
+        # Log any unexpected errors
+        logging.exception(f"Unexpected error in save_location: {str(e)}")
+        raise HTTPException(status_code=500, detail="Internal server error")
+
 
 @app.get("/api/location")
 async def get_location(token: str):
-    user_id = verify_token(token)
-    if not user_id:
-        raise HTTPException(status_code=401, detail="Invalid token")
-    
-    db = get_db()
+    """Get user's most recent location with improved error handling and fallback"""
     try:
-        cursor = db.cursor()
-        cursor.execute(
-            "SELECT latitude, longitude, timestamp FROM locations WHERE user_id = ? ORDER BY timestamp DESC LIMIT 1",
-            (user_id,)
-        )
-        location = cursor.fetchone()
-        if location:
-            return {
-                "latitude": location["latitude"],
-                "longitude": location["longitude"],
-                "timestamp": location["timestamp"]
-            }
-        else:
-            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Location not found")
+        # Verify token and get user_id
+        user_id = verify_token(token)
+        if not user_id:
+            logging.warning(f"Location get attempt with invalid token: {token[:10]}...")
+            raise HTTPException(status_code=401, detail="Invalid token")
+        
+        logging.info(f"Getting latest location for user_id {user_id}")
+        
+        db = get_db()
+        try:
+            cursor = db.cursor()
+            
+            # First try to get the most recent location
+            cursor.execute(
+                "SELECT latitude, longitude, timestamp FROM locations WHERE user_id = ? ORDER BY timestamp DESC LIMIT 1",
+                (user_id,)
+            )
+            location = cursor.fetchone()
+            
+            if location:
+                logging.info(f"Found location for user_id {user_id}")
+                return {
+                    "latitude": location["latitude"],
+                    "longitude": location["longitude"],
+                    "timestamp": location["timestamp"]
+                }
+            else:
+                # If no location found, return a more specific error
+                logging.warning(f"No location found for user_id {user_id}")
+                
+                # Instead of 404, return a default with a status flag
+                return {
+                    "latitude": 0,
+                    "longitude": 0,
+                    "timestamp": datetime.utcnow().isoformat(),
+                    "status": "no_location_found",
+                    "message": "No location data available yet. Please enable location services and try again."
+                }
+                
+        except Exception as e:
+            logging.error(f"Database error getting location for user_id {user_id}: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+        
+        finally:
+            db.close()
+            
+    except HTTPException:
+        # Re-raise HTTP exceptions
+        raise
     
     except Exception as e:
-        logging.error(f"Error fetching location for user_id {user_id}: {e}")
+        # Log any unexpected errors
+        logging.exception(f"Unexpected error in get_location: {str(e)}")
         raise HTTPException(status_code=500, detail="Internal server error")
-    
-    finally:
-        db.close()
 
 # Anti-theft API
 @app.post("/api/register-device-antitheft")
