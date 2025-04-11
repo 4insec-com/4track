@@ -1,0 +1,21 @@
+{
+  "name": "4track",
+  "short_name": "4track",
+  "description": "Minimal Android Phone Tracker",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#4B4275",
+  "theme_color": "#4B4275",
+  "icons": [
+    {
+      "src": "icons/small.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "icons/big.png",
+      "sizes": "500x500",
+      "type": "image/png"
+    }
+  ]
+}

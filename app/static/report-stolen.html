@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Report Stolen - GhostTrack</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <header>
+        <h1>GhostTrack - Report Stolen</h1>
+    </header>
+    
+    <main>
+        <div class="form-container">
+            <h2>Report Device as Stolen</h2>
+            <form id="report-form">
+                <div class="form-group">
+                    <label for="device-id">Device Hardware ID</label>
+                    <input type="text" id="device-id" required>
+                    <p class="help-text">Find this in your device settings or browser console (hwFingerprint)</p>
+                </div>
+                <div class="form-group">
+                    <label for="recovery-email">Recovery Email</label>
+                    <input type="email" id="recovery-email" required>
+                </div>
+                <div class="form-group">
+                    <label for="recovery-phone">Recovery Phone (optional)</label>
+                    <input type="tel" id="recovery-phone">
+                </div>
+                <button type="submit" class="btn btn-danger">Report Stolen</button>
+            </form>
+            <p class="text-center">
+                <a href="/">Back to GhostTrack</a>
+            </p>
+        </div>
+    </main>
+    
+    <script>
+        const reportForm = document.getElementById('report-form');
+        
+        reportForm.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            
+            const hardwareId = document.getElementById('device-id').value;
+            const email = document.getElementById('recovery-email').value;
+            const phone = document.getElementById('recovery-phone').value;
+            
+            try {
+                const formData = new FormData();
+                formData.append('hardwareId', hardwareId);
+                formData.append('email', email);
+                formData.append('phone', phone);
+                
+                const response = await fetch('/api/report-stolen', {
+                    method: 'POST',
+                    body: formData
+                });
+                
+                if (!response.ok) {
+                    throw new Error('Failed to report device as stolen');
+                }
+                
+                alert('Device reported as stolen. You will be notified if it connects to the internet.');
+                window.location.href = '/';
+            } catch (error) {
+                alert(error.message);
+            }
+        });
+    </script>
+</body>
+</html>
