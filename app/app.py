@@ -1092,6 +1092,6 @@ async def upload_photo(request: Request):
         raise HTTPException(status_code=500, detail=f"Server error: {str(e)}")
 
 # Serve static files
-app.mount("/", StaticFiles(directory="static", html=True), name="static")
+app.mount("/", StaticFiles(directory="app/static", html=True), name="static")
 
 # For development, run with: uvicorn app:app --host 0.0.0.0 --port 8000 --reload
