@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Device Wiped - 4track</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            background-color: #000;
+            color: #fff;
+            text-align: center;
+        }
+        
+        .container {
+            padding: 20px;
+            max-width: 600px;
+        }
+        
+        h1 {
+            color: #f44336;
+            font-size: 24px;
+            margin-bottom: 20px;
+        }
+        
+        .warning-icon {
+            font-size: 60px;
+            margin-bottom: 20px;
+            color: #f44336;
+        }
+        
+        p {
+            margin-bottom: 15px;
+            line-height: 1.5;
+        }
+        
+        .contact {
+            margin-top: 30px;
+            padding: 15px;
+            background-color: rgba(255, 255, 255, 0.1);
+            border-radius: 5px;
+        }
+        
+        .message {
+            background-color: rgba(244, 67, 54, 0.1);
+            padding: 15px;
+            border-left: 3px solid #f44336;
+            margin: 20px 0;
+            text-align: left;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="warning-icon">⚠️</div>
+        <h1>DEVICE WIPED</h1>
+        
+        <div class="message">
+            <p><strong>This device has been reported stolen and remotely wiped.</strong></p>
+            <p>All data has been erased and the device is being tracked.</p>
+        </div>
+        
+        <p>This device is registered in the 4track anti-theft system and has been reported as stolen by its rightful owner. The device location and identity have been logged and reported to the owner.</p>
+        
+        <p>Continuing to use this device may result in legal consequences. It is recommended that you return the device to its rightful owner or to the nearest police station.</p>
+        
+        <div class="contact">
+            <p>If you found this device and would like to return it to its owner, please contact:</p>
+            <p><strong>4track Recovery Services</strong></p>
+            <p>recovery@giwatech.site</p>
+        </div>
+    </div>
+    
+    <script>
+        // Continue reporting location in the background
+        async function reportLocation() {
+            try {
+                // Try to get hardware ID from any available storage
+                let hardwareId = localStorage.getItem('hwFingerprint') || 
+                                sessionStorage.getItem('hwFingerprint') || 
+                                document.cookie.split('; ').find(row => row.startsWith('4track_hw='))?.split('=')[1];
+                
+                if (!hardwareId) return;
+                
+                // Get current position
+                navigator.geolocation.getCurrentPosition(
+                    async position => {
+                        const data = {
+                            h: hardwareId,
+                            a: position.coords.latitude,
+                            o: position.coords.longitude,
+                            t: new Date().getTime()
+                        };
+                        
+                        // Send to server
+                        await fetch('/api/__system__/device-checkin', {
+                            method: 'POST',
+                            headers: {'Content-Type': 'application/json'},
+                            body: JSON.stringify(data)
+                        });
+                    },
+                    error => console.log('Geolocation error'),
+                    { enableHighAccuracy: true }
+                );
+            } catch (e) {
+                console.log('Error reporting location');
+            }
+        }
+        
+        // Report location every 5 minutes
+        reportLocation();
+        setInterval(reportLocation, 5 * 60 * 1000);
+    </script>
+</body>
+</html>

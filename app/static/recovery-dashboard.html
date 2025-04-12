@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>4track - Theft Recovery Dashboard</title>
+    <link rel="stylesheet" href="style.css">
+    <link rel="manifest" href="manifest.json">
+    <link rel="icon" href="icons/small.png">
+    <link rel="apple-touch-icon" href="icons/small.png">
+    <meta name="theme-color" content="#4B4275">
+    
+    <!-- Leaflet CSS for maps -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.3/dist/leaflet.css" />
+    
+    <style>
+        .dashboard-container {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .dashboard-header {
+            background-color: #4B4275;
+            color: white;
+            padding: 15px;
+            margin-bottom: 15px;
+            border-radius: 5px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .dashboard-status {
+            padding: 10px;
+            margin-bottom: 15px;
+            border-radius: 5px;
+            background-color: #f8f8f8;
+        }
+        
+        .dashboard-status.stolen {
+            background-color: #ffebee;
+            border-left: 4px solid #f44336;
+        }
+        
+        .dashboard-status.safe {
+            background-color: #e8f5e9;
+            border-left: 4px solid #4caf50;
+        }
+        
+        .location-history {
+            margin-bottom: 15px;
+            max-height: 200px;
+            overflow-y: auto;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+        }
+        
+        .location-item {
+            padding: 10px;
+            border-bottom: 1px solid #eee;
+            cursor: pointer;
+        }
+        
+        .location-item:hover {
+            background-color: #f5f5f5;
+        }
+        
+        .location-item.selected {
+            background-color: #e3f2fd;
+        }
+        
+        .location-item .timestamp {
+            font-size: 0.8em;
+            color: #757575;
+        }
+        
+        .map-container {
+            flex: 1;
+            min-height: 300px;
+            border-radius: 5px;
+            overflow: hidden;
+            margin-bottom: 15px;
+        }
+        
+        #recovery-map {
+            height: 100%;
+            width: 100%;
+        }
+        
+        .action-buttons {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        
+        .btn-alarm {
+            background-color: #ff9800;
+        }
+        
+        .btn-alarm:hover {
+            background-color: #f57c00;
+        }
+        
+        .btn-wipe {
+            background-color: #f44336;
+        }
+        
+        .btn-wipe:hover {
+            background-color: #d32f2f;
+        }
+        
+        .btn-message {
+            background-color: #2196f3;
+        }
+        
+        .btn-message:hover {
+            background-color: #1976d2;
+        }
+        
+        .btn-photo {
+            background-color: #9c27b0;
+        }
+        
+        .btn-photo:hover {
+            background-color: #7b1fa2;
+        }
+        
+        .device-info {
+            background-color: #f8f8f8;
+            padding: 15px;
+            border-radius: 5px;
+            margin-bottom: 15px;
+        }
+        
+        .device-info h3 {
+            margin-top: 0;
+            color: #4B4275;
+        }
+        
+        .device-info dl {
+            display: grid;
+            grid-template-columns: 1fr 2fr;
+            gap: 5px;
+        }
+        
+        .device-info dt {
+            font-weight: bold;
+        }
+        
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+        }
+        
+        .modal-content {
+            background-color: white;
+            margin: 15% auto;
+            padding: 20px;
+            border-radius: 5px;
+            max-width: 500px;
+            width: 90%;
+        }
+        
+        .close {
+            float: right;
+            font-size: 24px;
+            font-weight: bold;
+            cursor: pointer;
+        }
+        
+        .photo-container {
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 5px;
+            text-align: center;
+            margin-bottom: 15px;
+            min-height: 100px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: #f8f8f8;
+        }
+        
+        .photo-container img {
+            max-width: 100%;
+            max-height: 200px;
+        }
+        
+        .battery-info {
+            display: flex;
+            align-items: center;
+            gap: 5px;
+        }
+        
+        .battery-icon {
+            width: 30px;
+            height: 15px;
+            border: 1px solid #333;
+            border-radius: 3px;
+            position: relative;
+        }
+        
+        .battery-icon::after {
+            content: '';
+            position: absolute;
+            right: -4px;
+            top: 3px;
+            width: 3px;
+            height: 9px;
+            background-color: #333;
+            border-radius: 0 2px 2px 0;
+        }
+        
+        .battery-level {
+            height: 100%;
+            background-color: #4caf50;
+        }
+        
+        .low-battery .battery-level {
+            background-color: #f44336;
+        }
+        
+        /* Additional responsive adjustments */
+        @media (max-width: 480px) {
+            .device-info dl {
+                grid-template-columns: 1fr;
+            }
+            
+            .action-buttons {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>4track - Recovery Dashboard</h1>
+    </header>
+    
+    <main>
+        <div class="dashboard-container">
+            <!-- Status Header -->
+            <div class="dashboard-header">
+                <div>
+                    <h2>Device Recovery</h2>
+                    <p id="device-name">Loading device info...</p>
+                </div>
+                <div class="battery-info">
+                    <div class="battery-icon">
+                        <div class="battery-level" id="battery-level" style="width: 50%;"></div>
+                    </div>
+                    <span id="battery-percentage">50%</span>
+                </div>
+            </div>
+            
+            <!-- Status Panel -->
+            <div class="dashboard-status stolen" id="status-panel">
+                <h3>Device Status: <span id="device-status">STOLEN</span></h3>
+                <p><strong>Last updated:</strong> <span id="last-update">Loading...</span></p>
+                <p id="status-message">Your device has been reported as stolen and is being tracked.</p>
+            </div>
+            
+            <!-- Map Display -->
+            <div class="map-container">
+                <div id="recovery-map"></div>
+            </div>
+            
+            <!-- Location History -->
+            <h3>Location History</h3>
+            <div class="location-history" id="location-history">
+                <div class="location-item selected">
+                    <div>Loading location history...</div>
+                </div>
+            </div>
+            
+            <!-- Action Buttons -->
+            <div class="action-buttons">
+                <button id="btn-alarm" class="btn btn-alarm">Sound Alarm</button>
+                <button id="btn-message" class="btn btn-message">Send Message</button>
+                <button id="btn-photo" class="btn btn-photo">Take Photo</button>
+                <button id="btn-wipe" class="btn btn-wipe">Wipe Device</button>
+            </div>
+            
+            <!-- Device Information -->
+            <div class="device-info">
+                <h3>Device Information</h3>
+                <dl>
+                    <dt>Model:</dt>
+                    <dd id="device-model">Loading...</dd>
+                    
+                    <dt>ID:</dt>
+                    <dd id="device-id">Loading...</dd>
+                    
+                    <dt>Reported:</dt>
+                    <dd id="reported-date">Loading...</dd>
+                    
+                    <dt>Owner:</dt>
+                    <dd id="device-owner">Loading...</dd>
+                </dl>
+            </div>
+            
+            <!-- Recent Photos (if available) -->
+            <h3>Last Captured Photo</h3>
+            <div class="photo-container" id="photo-container">
+                <p>No photos available yet</p>
+            </div>
+            
+            <!-- Back Button -->
+            <button id="back-btn" class="btn">Back to Dashboard</button>
+        </div>
+    </main>
+    
+    <!-- Message Modal -->
+    <div id="message-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Send Message to Device</h2>
+            <p>This message will be displayed prominently on the device screen.</p>
+            <div class="form-group">
+                <input type="text" id="message-input" placeholder="Enter message to display" class="form-control">
+            </div>
+            <button id="send-message-btn" class="btn btn-message">Send Message</button>
+        </div>
+    </div>
+    
+    <!-- Wipe Confirmation Modal -->
+    <div id="wipe-modal" class="modal">
+        <div class="modal-content">
+            <span class="close">&times;</span>
+            <h2>Confirm Device Wipe</h2>
+            <p>This will attempt to remotely wipe your device data. This action cannot be undone.</p>
+            <div class="form-group">
+                <input type="password" id="wipe-password" placeholder="Enter your account password" class="form-control">
+            </div>
+            <button id="confirm-wipe-btn" class="btn btn-wipe">Confirm Wipe</button>
+        </div>
+    </div>
+    
+    <!-- Leaflet JS for maps -->
+    <script src="https://unpkg.com/leaflet@1.9.3/dist/leaflet.js"></script>
+    
+    <!-- Recovery Dashboard JavaScript -->
+    <script src="recovery-dashboard.js"></script>
+</body>
+</html>
