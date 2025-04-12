@@ -1,4 +1,4 @@
-import stealthMode from './stealth-worker.js';
+
 
 // Configuration
 const API_URL = `${window.location.protocol}//${window.location.host}/api`;
